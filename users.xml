@@ -1,0 +1,50 @@
+<?xml version='1.0' encoding='utf-8'?>
+<data>
+    <users>
+        <item>
+            <first_name>John</first_name>
+            <last_name>Doe</last_name>
+            <age>34</age>
+            <email>john.doe@gmail.com</email>
+            <username>john526</username>
+            <registered_at>2025-03-18</registered_at>
+            <address>4666 Pine Rd, Charlotte, CA, 27446</address>
+        </item>
+        <item>
+            <first_name>Jane</first_name>
+            <last_name>Smith</last_name>
+            <age>35</age>
+            <email>jane.smith@yahoo.com</email>
+            <username>jane152</username>
+            <registered_at>2024-11-21</registered_at>
+            <address>4924 Maple Dr, Denver, CA, 27690</address>
+        </item>
+        <item>
+            <first_name>James</first_name>
+            <last_name>Johnson</last_name>
+            <age>29</age>
+            <email>james.johnson@hotmail.com</email>
+            <username>james563</username>
+            <registered_at>2024-12-14</registered_at>
+            <address>6089 Elm St, Greenville, CA, 15561</address>
+        </item>
+        <item>
+            <first_name>Jill</first_name>
+            <last_name>Brown</last_name>
+            <age>30</age>
+            <email>jill.brown@aol.com</email>
+            <username>jill910</username>
+            <registered_at>2025-01-09</registered_at>
+            <address>2342 Elm St, Seattle, WA, 69667</address>
+        </item>
+        <item>
+            <first_name>Jack</first_name>
+            <last_name>Davis</last_name>
+            <age>34</age>
+            <email>jack.davis@msn.com</email>
+            <username>jack729</username>
+            <registered_at>2024-12-06</registered_at>
+            <address>8524 Oak Ave, Austin, CA, 66524</address>
+        </item>
+    </users>
+</data>

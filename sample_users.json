@@ -1,0 +1,49 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "firstName": "John",
+      "lastName": "Doe",
+      "email": "john.doe@example.com",
+      "username": "john448",
+      "age": 23,
+      "registeredAt": "2025-05-17T11:49:48.873219",
+      "address": {
+        "street": "1755 Birch Blvd",
+        "city": "Seattle",
+        "state": "TX",
+        "zip": "88653"
+      }
+    },
+    {
+      "id": 2,
+      "firstName": "Jane",
+      "lastName": "Smith",
+      "email": "jane.smith@sample.com",
+      "username": "jane707",
+      "age": 39,
+      "registeredAt": "2025-08-05T11:49:48.873251",
+      "address": {
+        "street": "2448 Birch Blvd",
+        "city": "Boston",
+        "state": "CA",
+        "zip": "25251"
+      }
+    },
+    {
+      "id": 3,
+      "firstName": "Jim",
+      "lastName": "Brown",
+      "email": "jim.brown@test.com",
+      "username": "jim100",
+      "age": 31,
+      "registeredAt": "2024-12-28T11:49:48.873266",
+      "address": {
+        "street": "2013 Maple Dr",
+        "city": "San Diego",
+        "state": "TX",
+        "zip": "78271"
+      }
+    }
+  ]
+}
