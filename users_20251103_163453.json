@@ -1,0 +1,57 @@
+[
+  {
+    "Name": "Colleen Weaver",
+    "Email": "yroach@gmail.com",
+    "Username": "ashley80",
+    "Age": 34,
+    "Phone": "+1-807-491-5168",
+    "Address": "84710 Costa Station, West Deborah, MI 01732",
+    "Job Title": "Geoscientist",
+    "Company": "Rodriguez-Reed",
+    "Registered At": "2023-11-15T12:09:02.702164"
+  },
+  {
+    "Name": "Shawn Smith",
+    "Email": "codycollins@hotmail.com",
+    "Username": "zburns",
+    "Age": 33,
+    "Phone": "(955)687-6322",
+    "Address": "8703 Elaine Roads, West Briannaborough, LA 45544",
+    "Job Title": "Arts administrator",
+    "Company": "Patel-Daniel",
+    "Registered At": "2025-07-24T19:00:24.516185"
+  },
+  {
+    "Name": "Crystal Roberts",
+    "Email": "philip20@gmail.com",
+    "Username": "jackwhite",
+    "Age": 36,
+    "Phone": "751-702-2822x84509",
+    "Address": "5958 Stanton Meadow, New Jodi, UT 21053",
+    "Job Title": "Retail banker",
+    "Company": "Gomez and Sons",
+    "Registered At": "2024-10-03T08:07:36.298966"
+  },
+  {
+    "Name": "Michael Gamble",
+    "Email": "edward45@hotmail.com",
+    "Username": "rodriguezcathy",
+    "Age": 40,
+    "Phone": "694-353-6786",
+    "Address": "2294 Montgomery Ridges, North Tonimouth, ME 56871",
+    "Job Title": "Restaurant manager, fast food",
+    "Company": "Blevins-Kelly",
+    "Registered At": "2024-04-01T09:52:11.672093"
+  },
+  {
+    "Name": "David Davis",
+    "Email": "denise59@gmail.com",
+    "Username": "lmorrison",
+    "Age": 36,
+    "Phone": "778.311.1821",
+    "Address": "00077 Pamela Hills Suite 285, Youngside, WI 83359",
+    "Job Title": "Medical secretary",
+    "Company": "Bell-Cortez",
+    "Registered At": "2024-05-24T03:46:19.418222"
+  }
+]
