@@ -1,338 +1,304 @@
+import re
 import json
 import csv
-import xml.etree.ElementTree as ET
-import re
-import os
 import random
 from datetime import datetime, timedelta
 from faker import Faker
+from xml.etree.ElementTree import Element, SubElement, ElementTree
 
 fake = Faker()
-last_generated_data = None
-last_fields = None
-last_category = None
+session_data = {"last_generated": None, "last_type": None}
 
-# ---------- FIELD GENERATION PATTERNS ----------
-field_patterns = [
-    # Personal
-    (r"name", lambda: fake.name()),
-    (r"first_name", lambda: fake.first_name()),
-    (r"last_name", lambda: fake.last_name()),
-    (r"email", lambda: fake.email()),
-    (r"user(name)?", lambda: fake.user_name()),
-    (r"dob|birthdate|date_of_birth", None),  # handled in inter-field logic
-    (r"age", None),  # handled in inter-field logic
-    (r"phone", lambda: fake.phone_number()),
-    (r"address", lambda: fake.address().replace("\n", ", ")),
-    (r"registered_at", lambda: fake.date_time_this_year().isoformat()),
+# -------------------- FIELD MAPS & ALIASES --------------------
 
-    # Location
-    (r"state", lambda: fake.state()),
-    (r"city", lambda: fake.city()),
-    (r"country", lambda: fake.country()),
-    (r"zipcode|postal", lambda: fake.postcode()),
+FIELD_MAP = {
+    "name": lambda: fake.name(),
+    "email": lambda: fake.email(),
+    "phone": lambda: fake.phone_number(),
+    "address": lambda: fake.address().replace("\n", ", "),
+    "city": lambda: fake.city(),
+    "state": lambda: fake.state(),
+    "country": lambda: fake.country(),
+    "zipcode": lambda: fake.zipcode(),
 
-    # Company / Job
-    (r"company|organization|employer|bank", lambda: fake.company()),
-    (r"job|title|position", lambda: fake.job()),
-    (r"department", lambda: fake.bs()),
+    # Students
+    "dob": lambda min_age=5, max_age=22: fake.date_of_birth(minimum_age=min_age, maximum_age=max_age),
+    "age": lambda min_age=5, max_age=22: random.randint(min_age, max_age),
+    "gpa": lambda: round(random.uniform(2.0, 4.0), 2),
+    "grade": lambda age: max(1, min(12, age - 5 + 1)),
+    "school name": lambda age: generate_school_name(age),
+    "college name": lambda: random.choice([
+        "MIT", "Stanford University", "Harvard University", "Yale University",
+        "Princeton University", "UCLA", "UC Berkeley", "Columbia University"
+    ]),
+    "major": lambda: random.choice(["Computer Science", "Biology", "Business", "Engineering", "Mathematics", "Economics"]),
+    "year": lambda age: random.randint(1, 4),
 
-    # Banking
-    (r"bank_account|account_number", lambda: str(random.randint(100000000000, 999999999999))),
-    (r"aba|routing", lambda: "{:09d}".format(random.randint(0, 999999999))),
-    (r"balance", lambda: round(random.uniform(1000, 100000), 2)),
-    (r"ifsc|swift", lambda: fake.swift()),
-    (r"bank_name", lambda: fake.company()),
+    # Bank
+    "bank name": lambda: random.choice(["Chase", "Bank of America", "Citi", "Wells Fargo", "PNC"]),
+    "aba number": lambda: f"{random.randint(100000000,999999999)}",
+    "account number": lambda: f"{random.randint(1000000000,9999999999)}",
+    "balance": lambda: round(random.uniform(1000, 100000),2),
 
-    # School
-    (r"grade", None),  # handled in inter-field logic
-    (r"gpa", None),  # handled in college logic
-    (r"school|university", lambda: fake.company()),
+    # Employee
+    "job title": lambda: random.choice(["Software Engineer", "Manager", "Data Analyst", "Consultant", "Designer"]),
+    "company": lambda: fake.company(),
+}
 
-    # College
-    (r"year", None),  # handled in college logic
-    (r"major", None),  # handled in college logic
+ALIASES = {
+    "university": "college name",
+    "college": "college name",
+    "school": "school name",
+    "bank": "bank name",
+    "job": "job title",
+    "aba": "aba number",
+    "account": "account number",
+}
 
-    # Fallback
-    (r".*", lambda: fake.word()),
-]
+# -------------------- GENERATORS --------------------
 
-def generate_field_value(field_name, category=None):
-    f = field_name.lower().strip().replace(" ", "_")
-    for pattern, generator in field_patterns:
-        if re.search(pattern, f):
-            if generator:
-                return generator()
-            else:
-                return None
-    return fake.word()
+def generate_school_name(age):
+    if age <= 10:
+        school_type = "Elementary School"
+    elif 11 <= age <= 14:
+        school_type = "Middle School"
+    else:
+        school_type = "High School"
 
-# ---------- RECORD GENERATORS ----------
+    prefixes = ["Greenwood", "Riverdale", "Sunrise", "St. Thomas", "Oakwood",
+                "Blue Ridge", "Cedar Grove", "Hillcrest", "Maple Leaf", "Silver Lake"]
+
+    return f"{random.choice(prefixes)} {school_type}"
+
 def generate_student_record(fields):
-    """K-12 Student: DOB ↔ Age ↔ Grade"""
+    age = random.randint(5, 18)
+    dob = (datetime.today() - timedelta(days=age*365 + random.randint(0, 364))).date()
+    grade = max(1, min(12, age - 5 + 1))
     record = {}
-    age = None
-    dob = None
-    grade = None
-
-    # DOB first if present
-    if "DOB" in fields or "dob" in [f.lower() for f in fields]:
-        dob = fake.date_of_birth(minimum_age=5, maximum_age=18)
-        record["DOB"] = dob.strftime("%Y-%m-%d")
-        age = (datetime.today().date() - dob).days // 365
-        if "Age" in fields:
-            record["Age"] = age
-
-    # Age if present but DOB missing
-    if "Age" in fields and age is None:
-        age = random.randint(5, 18)
-        record["Age"] = age
-        if "DOB" in fields:
-            dob = datetime.today().date() - timedelta(days=age*365 + random.randint(0,364))
-            record["DOB"] = dob.strftime("%Y-%m-%d")
-
-    # Grade mapping
-    if "Grade" in fields:
-        grade = min(max(age - 5 + 1, 1), 12) if age else random.randint(1,12)
-        record["Grade"] = grade
-
-    # Other fields
-    for f in fields:
-        if f not in record:
-            record[f] = generate_field_value(f, "student")
-
+    for field in fields:
+        f_lower = field.lower()
+        f_lower = ALIASES.get(f_lower, f_lower)  # map aliases
+        if f_lower == "age":
+            record[field] = age
+        elif f_lower == "dob":
+            record[field] = dob.isoformat()
+        elif f_lower == "grade":
+            record[field] = grade
+        elif f_lower == "school name":
+            record[field] = generate_school_name(age)
+        else:
+            record[field] = FIELD_MAP.get(f_lower, lambda: fake.word())()
     return record
 
 def generate_college_student_record(fields):
-    """College student: DOB ↔ Age ↔ Year ↔ GPA"""
+    age = random.randint(18, 25)
+    dob = (datetime.today() - timedelta(days=age*365 + random.randint(0, 364))).date()
+    year = random.randint(1,4)
     record = {}
-    age = None
-    dob = None
-    year = None
-
-    if "DOB" in fields or "dob" in [f.lower() for f in fields]:
-        dob = fake.date_of_birth(minimum_age=17, maximum_age=25)
-        record["DOB"] = dob.strftime("%Y-%m-%d")
-        age = (datetime.today().date() - dob).days // 365
-        if "Age" in fields:
-            record["Age"] = age
-
-    if "Age" in fields and age is None:
-        age = random.randint(17,25)
-        record["Age"] = age
-        if "DOB" in fields:
-            dob = datetime.today().date() - timedelta(days=age*365 + random.randint(0,364))
-            record["DOB"] = dob.strftime("%Y-%m-%d")
-
-    # Year mapping
-    if "Year" in fields or "Grade" in fields:
-        if age:
-            if age <= 18:
-                year = "Freshman"
-            elif age == 19:
-                year = "Sophomore"
-            elif age == 20:
-                year = "Junior"
-            elif 21 <= age <= 22:
-                year = "Senior"
-            else:
-                year = "Graduate"
+    for field in fields:
+        f_lower = field.lower()
+        f_lower = ALIASES.get(f_lower, f_lower)  # map aliases
+        if f_lower == "age":
+            record[field] = age
+        elif f_lower == "dob":
+            record[field] = dob.isoformat()
+        elif f_lower == "year":
+            record[field] = year
+        elif f_lower == "college name":
+            record[field] = FIELD_MAP["college name"]()
+        elif f_lower == "major":
+            record[field] = FIELD_MAP["major"]()
+        elif f_lower == "gpa":
+            record[field] = FIELD_MAP["gpa"]()
         else:
-            year = random.choice(["Freshman","Sophomore","Junior","Senior","Graduate"])
-        record["Year"] = year
-
-    # GPA
-    if "GPA" in fields:
-        record["GPA"] = round(random.uniform(2.0, 4.0),2)
-
-    # Major / University
-    if "Major" in fields:
-        majors = ["Computer Science", "Business", "Economics", "Psychology", "Engineering", "Biology", "Mathematics"]
-        record["Major"] = random.choice(majors)
-    if "University" in fields:
-        record["University"] = fake.company() + " University"
-
-    # Other fields
-    for f in fields:
-        if f not in record:
-            record[f] = generate_field_value(f, "college_student")
-
+            record[field] = FIELD_MAP.get(f_lower, lambda: fake.word())()
     return record
 
-def generate_generic_record(fields, category=None):
-    """Other categories (bank, employee, customer, user)"""
+def generate_bank_customer_record(fields):
+    age = random.randint(18, 80)
+    dob = (datetime.today() - timedelta(days=age*365 + random.randint(0, 364))).date()
     record = {}
-    for f in fields:
-        record[f] = generate_field_value(f, category)
+    for field in fields:
+        f_lower = field.lower()
+        f_lower = ALIASES.get(f_lower, f_lower)
+        if f_lower == "age":
+            record[field] = age
+        elif f_lower == "dob":
+            record[field] = dob.isoformat()
+        elif f_lower == "balance":
+            record[field] = FIELD_MAP["balance"]()
+        elif f_lower == "aba number":
+            record[field] = FIELD_MAP["aba number"]()
+        elif f_lower == "account number":
+            record[field] = FIELD_MAP["account number"]()
+        elif f_lower == "bank name":
+            record[field] = FIELD_MAP["bank name"]()
+        else:
+            record[field] = FIELD_MAP.get(f_lower, lambda: fake.word())()
     return record
 
-# ---------- FILE SAVE HELPERS ----------
-def save_to_json(data, filename="data.json"):
-    with open(filename, "w") as f:
-        json.dump(data, f, indent=4)
-    print(f"✅ Saved to {os.path.abspath(filename)}")
+def generate_employee_record(fields):
+    age = random.randint(22, 65)
+    dob = (datetime.today() - timedelta(days=age*365 + random.randint(0, 364))).date()
+    record = {}
+    for field in fields:
+        f_lower = field.lower()
+        f_lower = ALIASES.get(f_lower, f_lower)
+        if f_lower == "age":
+            record[field] = age
+        elif f_lower == "dob":
+            record[field] = dob.isoformat()
+        elif f_lower == "job title":
+            record[field] = FIELD_MAP["job title"]()
+        elif f_lower == "company":
+            record[field] = FIELD_MAP["company"]()
+        else:
+            record[field] = FIELD_MAP.get(f_lower, lambda: fake.word())()
+    return record
 
-def save_to_csv(data, filename="data.csv"):
-    with open(filename, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=data[0].keys())
-        writer.writeheader()
-        writer.writerows(data)
-    print(f"✅ Saved to {os.path.abspath(filename)}")
-
-def save_to_xml(data, filename="data.xml"):
-    root = ET.Element("records")
-    for record in data:
-        item = ET.SubElement(root, "record")
-        for key, value in record.items():
-            child = ET.SubElement(item, key.replace(" ", "_"))
-            child.text = str(value)
-    tree = ET.ElementTree(root)
-    tree.write(filename, encoding="utf-8", xml_declaration=True)
-    print(f"✅ Saved to {os.path.abspath(filename)}")
-
-# ---------- DEFAULT FIELD SETS ----------
-default_fields_by_category = {
-    "student": ["Name","Age","Grade","GPA","DOB","City","State","Address","School"],
-    "college_student": ["Name","Age","Year","GPA","DOB","Major","University","City","State","Address"],
-    "bank": ["Name","DOB","Bank Name","ABA Number","Bank Account Number","Balance","City","State"],
-    "employee": ["Name","Email","Phone","Job Title","Company","Department","City","State","Address"],
-    "customer": ["Name","Email","Phone","Address","City","State","Loyalty Points","Membership Level"],
-    "user": ["Name","Email","Username","Phone","Address","Registered At","City","State"],
-}
-
-# ---------- COMMAND PARSER ----------
-def parse_generate_command(text):
-    count_match = re.search(r"generate\s+(\d+)", text)
-    count = int(count_match.group(1)) if count_match else 5
-
-    category = None
-    for c in default_fields_by_category.keys():
-        if c in text.lower():
-            category = c
-            break
-
-    fields_match = re.search(r"with\s+(.+)", text)
-    if fields_match:
-        raw_fields = [f.strip() for f in fields_match.group(1).split(",")]
-        fields = []
-        for f in raw_fields:
-            num_match = re.match(r"(\d+)\s*fields", f)
-            if num_match:
-                n = int(num_match.group(1))
-                default_fields = default_fields_by_category.get(category, ["Field1","Field2"])
-                fields += default_fields[:n] if n <= len(default_fields) else default_fields + [f"CustomField{i}" for i in range(1,n-len(default_fields)+1)]
-            else:
-                fields.append(f.split(":")[0].strip())
+def generate_entity_record(entity_type, fields):
+    entity_type = entity_type.lower()
+    if entity_type in ["student","students"]:
+        return generate_student_record(fields)
+    elif entity_type in ["college_student","college_students"]:
+        return generate_college_student_record(fields)
+    elif entity_type in ["bank_customer","bank_customers"]:
+        return generate_bank_customer_record(fields)
+    elif entity_type in ["employee","employees"]:
+        return generate_employee_record(fields)
     else:
-        fields = default_fields_by_category.get(category, ["Name","Email","Phone","Address"])
+        return {f: fake.word() for f in fields}
 
-    return count, fields, category
+# -------------------- UPDATE LAST GENERATED --------------------
 
-# ---------- AGENT LOGIC ----------
+def update_last_generated(add_fields=None, remove_fields=None):
+    if not session_data["last_generated"]:
+        print("⚠️ No previous data to update. Please generate first.")
+        return
+    
+    add_fields = [f.strip().title() for f in add_fields] if add_fields else []
+    remove_fields = [f.strip().title() for f in remove_fields] if remove_fields else []
+
+    updated_data = []
+    entity_type = session_data.get("last_type", "student")
+    for record in session_data["last_generated"]:
+        # Remove fields
+        for field in remove_fields:
+            record.pop(field, None)
+        # Add new fields
+        for field in add_fields:
+            new_val = generate_entity_record(entity_type, [field])[field]
+            record[field] = new_val
+        updated_data.append(record)
+    
+    session_data["last_generated"] = updated_data
+    print(f"✅ Updated last generated data with additions/removals.\n")
+    for d in updated_data:
+        print(json.dumps(d, indent=2))
+
+# -------------------- SAVE --------------------
+
+def save_data(data, format_type):
+    filename = f"generated_data.{format_type}"
+    if format_type == "csv":
+        with open(filename, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=data[0].keys())
+            writer.writeheader()
+            writer.writerows(data)
+    elif format_type == "json":
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4)
+    elif format_type == "xml":
+        root = Element("Records")
+        for rec in data:
+            rec_elem = SubElement(root, "Record")
+            for k, v in rec.items():
+                field_elem = SubElement(rec_elem, k.replace(" ", "_"))
+                field_elem.text = str(v)
+        ElementTree(root).write(filename, encoding="utf-8", xml_declaration=True)
+    print(f"💾 Saved {len(data)} records to {filename}")
+
+# -------------------- AGENT / COMMAND --------------------
+
 def run_agent(command):
-    global last_generated_data, last_fields, last_category
+    global session_data
+    command = command.strip()
 
-    command_lower = command.lower()
-
-    # --- GENERATE NEW RECORDS ---
-    if command_lower.startswith("generate"):
-        count, fields, category = parse_generate_command(command)
-        data = []
-        for _ in range(count):
-            if category=="student":
-                data.append(generate_student_record(fields))
-            elif category=="college_student":
-                data.append(generate_college_student_record(fields))
+    # --- Generate ---
+    if match := re.search(r"generate\s+(\d+)\s+(\w+)(?:\s+with\s+(.*))?$", command, re.I):
+        count = int(match.group(1))
+        entity_type = match.group(2).lower()
+        field_part = match.group(3)
+        if field_part:
+            fields = [f.strip().title() for f in re.split(r",|\band\b", field_part) if f.strip()]
+        else:
+            # Default fields per entity
+            if entity_type in ["student","students"]:
+                fields = ["Name","Age","Grade","GPA","DOB","City","State","Address","School Name","Country","Zipcode"]
+            elif entity_type in ["college_student","college_students"]:
+                fields = ["Name","Age","DOB","College Name","Major","Year","GPA","City","State","Country"]
+            elif entity_type in ["bank_customer","bank_customers"]:
+                fields = ["Name","Age","DOB","Bank Name","ABA Number","Account Number","Balance","Email","Phone","Address","City","State","Country"]
+            elif entity_type in ["employee","employees"]:
+                fields = ["Name","Age","DOB","Job Title","Company","Email","Phone","Address","City","State","Country"]
             else:
-                data.append(generate_generic_record(fields, category))
-        last_generated_data = data
-        last_fields = fields.copy()
-        last_category = category
-        print(f"\n✅ Generated {count} {category or 'record(s)'}:\n")
+                fields = ["Name"]
+        
+        data = [generate_entity_record(entity_type, fields) for _ in range(count)]
+        session_data["last_generated"] = data
+        session_data["last_type"] = entity_type
+
+        print(f"\n✅ Generated {count} {entity_type}(s):\n")
         for d in data:
-            for k,v in d.items():
-                print(f"  - {k}: {v}")
-            print()
+            print(json.dumps(d, indent=2))
         return
 
-    # --- ADD FIELDS ---
-    if command_lower.startswith("add "):
-        if not last_generated_data or not last_fields:
-            print("⚠️ No previous data to add fields to. Generate something first.")
-            return
-        add_fields_match = re.findall(r"add\s+(.+)", command, re.IGNORECASE)
-        if add_fields_match:
-            new_fields = [f.strip() for f in add_fields_match[0].split(",")]
-            for i, record in enumerate(last_generated_data):
-                if last_category=="student":
-                    last_generated_data[i] = generate_student_record(list(record.keys())+new_fields)
-                elif last_category=="college_student":
-                    last_generated_data[i] = generate_college_student_record(list(record.keys())+new_fields)
-                else:
-                    for field in new_fields:
-                        if field not in record:
-                            record[field] = generate_field_value(field, last_category)
-            last_fields += [f for f in new_fields if f not in last_fields]
-            print(f"\n✅ Added fields {', '.join(new_fields)} to last generated records.\n")
-            for d in last_generated_data:
-                for k,v in d.items():
-                    print(f"  - {k}: {v}")
-                print()
+    # --- Update Fields ---
+    if "add" in command.lower() or "remove" in command.lower():
+        add_fields = re.findall(r"add\s+([a-zA-Z_ ]+)", command, re.I)
+        remove_fields = re.findall(r"remove\s+([a-zA-Z_ ]+)", command, re.I)
+        update_last_generated(add_fields=add_fields, remove_fields=remove_fields)
         return
 
-    # --- REMOVE FIELDS ---
-    if command_lower.startswith("remove "):
-        if not last_generated_data or not last_fields:
-            print("⚠️ No previous data to remove fields from. Generate something first.")
-            return
-        remove_fields_match = re.findall(r"remove\s+(.+)", command, re.IGNORECASE)
-        if remove_fields_match:
-            rem_fields = [f.strip() for f in remove_fields_match[0].split(",")]
-            for record in last_generated_data:
-                for field in rem_fields:
-                    if field in record:
-                        del record[field]
-            last_fields = [f for f in last_fields if f not in rem_fields]
-            print(f"\n✅ Removed fields {', '.join(rem_fields)} from last generated records.\n")
-            for d in last_generated_data:
-                for k,v in d.items():
-                    print(f"  - {k}: {v}")
-                print()
-        return
-
-    # --- SAVE DATA ---
-    if "save" in command_lower:
-        if not last_generated_data:
+    # --- Save ---
+    if command.lower().startswith("save"):
+        if not session_data["last_generated"]:
             print("⚠️ No generated data available to save. Please generate something first.")
             return
-        if "json" in command_lower:
-            save_to_json(last_generated_data)
-        elif "csv" in command_lower:
-            save_to_csv(last_generated_data)
-        elif "xml" in command_lower:
-            save_to_xml(last_generated_data)
+        if "json" in command.lower():
+            save_data(session_data["last_generated"], "json")
+        elif "csv" in command.lower():
+            save_data(session_data["last_generated"], "csv")
+        elif "xml" in command.lower():
+            save_data(session_data["last_generated"], "xml")
         else:
-            print("⚠️ Please specify a valid format: JSON, CSV, or XML.")
+            print("💡 Please specify format: csv/json/xml")
         return
 
-    # --- EXIT ---
-    if command_lower in ["exit","quit"]:
-        print("👋 Exiting Test Data Generator.")
+    # --- Exit ---
+    if command.lower() in ["exit","quit"]:
+        print("👋 Exiting AI Test Data Generator.")
         exit()
 
-    print("⚠️ Unknown command. Try 'generate 5 students with 6 fields', 'add DOB', 'remove Phone', or 'save as csv'.")
+    print("⚙️ Unknown command. Try 'generate 5 students with Name, State, School Name', 'add City', 'remove Age', or 'save as csv/json/xml'.")
 
-# ---------- MAIN LOOP ----------
-if __name__ == "__main__":
-    print("💡 AI Test Data Generator v9.1 (Fully Dynamic, Stateful, Realistic Fields)")
+# -------------------- CLI --------------------
+
+def main():
+    print("💡 AI Test Data Generator v2.1 (Dynamic, Multi-Entity, Stateful, Realistic Aliases)")
     print("Examples:")
-    print("   → generate 5 students with 6 fields")
-    print("   → generate 5 college_students with 6 fields")
-    print("   → add DOB, GPA")
-    print("   → remove Age")
-    print("   → save as csv/json/xml")
-    print("   → exit\n")
+    print("  → generate 5 students with Name, State, School Name")
+    print("  → generate 5 college_students with Name, Major, University, GPA")
+    print("  → generate 5 bank_customers with Name, DOB, Bank, ABA Number")
+    print("  → generate 5 employees with Name, Job, Company, Email")
+    print("  → add City")
+    print("  → remove Age")
+    print("  → save as csv/json/xml")
+    print("  → exit\n")
 
     while True:
-        user_input = input("You: ")
-        run_agent(user_input)
+        command = input("You: ")
+        run_agent(command)
+
+if __name__ == "__main__":
+    main()
