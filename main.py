@@ -164,11 +164,10 @@ def generate_birthdate_for_age(age):
 
 
 def random_age_and_dob(min_age, max_age):
-    dob = fake.date_of_birth(minimum_age=min_age, maximum_age=max_age)
-    age = calculate_age_from_dob(dob)
-    if age < min_age or age > max_age:
-        # regenerate if faker returns outside the strict bounds (edge case)
-        return random_age_and_dob(min_age, max_age)
+    """Return an age/DOB pair where both values are guaranteed to align."""
+
+    age = random.randint(min_age, max_age)
+    dob = generate_birthdate_for_age(age)
     return age, dob
 
 
