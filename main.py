@@ -45,7 +45,7 @@ FIELD_MAP = {
     "company": lambda: fake.company(),
 }
 
-ALIASES = {
+FIELD_ALIASES = {
     "university": "college name",
     "college": "college name",
     "school": "school name",
@@ -53,6 +53,73 @@ ALIASES = {
     "job": "job title",
     "aba": "aba number",
     "account": "account number",
+}
+
+ENTITY_ALIASES = {
+    "student": "student",
+    "students": "student",
+    "college_student": "college_student",
+    "college_students": "college_student",
+    "bank_customer": "bank_customer",
+    "bank_customers": "bank_customer",
+    "employee": "employee",
+    "employees": "employee",
+}
+
+DEFAULT_FIELDS = {
+    "student": [
+        "Name",
+        "Age",
+        "Grade",
+        "GPA",
+        "DOB",
+        "City",
+        "State",
+        "Address",
+        "School Name",
+        "Country",
+        "Zipcode",
+    ],
+    "college_student": [
+        "Name",
+        "Age",
+        "DOB",
+        "College Name",
+        "Major",
+        "Year",
+        "GPA",
+        "City",
+        "State",
+        "Country",
+    ],
+    "bank_customer": [
+        "Name",
+        "Age",
+        "DOB",
+        "Bank Name",
+        "ABA Number",
+        "Account Number",
+        "Balance",
+        "Email",
+        "Phone",
+        "Address",
+        "City",
+        "State",
+        "Country",
+    ],
+    "employee": [
+        "Name",
+        "Age",
+        "DOB",
+        "Job Title",
+        "Company",
+        "Email",
+        "Phone",
+        "Address",
+        "City",
+        "State",
+        "Country",
+    ],
 }
 
 # -------------------- GENERATORS --------------------
@@ -77,7 +144,7 @@ def generate_student_record(fields):
     record = {}
     for field in fields:
         f_lower = field.lower()
-        f_lower = ALIASES.get(f_lower, f_lower)  # map aliases
+        f_lower = FIELD_ALIASES.get(f_lower, f_lower)  # map aliases
         if f_lower == "age":
             record[field] = age
         elif f_lower == "dob":
@@ -97,7 +164,7 @@ def generate_college_student_record(fields):
     record = {}
     for field in fields:
         f_lower = field.lower()
-        f_lower = ALIASES.get(f_lower, f_lower)  # map aliases
+        f_lower = FIELD_ALIASES.get(f_lower, f_lower)  # map aliases
         if f_lower == "age":
             record[field] = age
         elif f_lower == "dob":
@@ -120,7 +187,7 @@ def generate_bank_customer_record(fields):
     record = {}
     for field in fields:
         f_lower = field.lower()
-        f_lower = ALIASES.get(f_lower, f_lower)
+        f_lower = FIELD_ALIASES.get(f_lower, f_lower)
         if f_lower == "age":
             record[field] = age
         elif f_lower == "dob":
@@ -143,7 +210,7 @@ def generate_employee_record(fields):
     record = {}
     for field in fields:
         f_lower = field.lower()
-        f_lower = ALIASES.get(f_lower, f_lower)
+        f_lower = FIELD_ALIASES.get(f_lower, f_lower)
         if f_lower == "age":
             record[field] = age
         elif f_lower == "dob":
@@ -156,18 +223,28 @@ def generate_employee_record(fields):
             record[field] = FIELD_MAP.get(f_lower, lambda: fake.word())()
     return record
 
+
+ENTITY_GENERATORS = {
+    "student": generate_student_record,
+    "college_student": generate_college_student_record,
+    "bank_customer": generate_bank_customer_record,
+    "employee": generate_employee_record,
+}
+
+
+def normalize_entity_type(entity_type):
+    """Normalize entity labels (including plural forms) to the canonical key."""
+
+    if not entity_type:
+        return None
+    return ENTITY_ALIASES.get(entity_type.lower())
+
+
 def generate_entity_record(entity_type, fields):
-    entity_type = entity_type.lower()
-    if entity_type in ["student","students"]:
-        return generate_student_record(fields)
-    elif entity_type in ["college_student","college_students"]:
-        return generate_college_student_record(fields)
-    elif entity_type in ["bank_customer","bank_customers"]:
-        return generate_bank_customer_record(fields)
-    elif entity_type in ["employee","employees"]:
-        return generate_employee_record(fields)
-    else:
-        return {f: fake.word() for f in fields}
+    normalized = normalize_entity_type(entity_type)
+    if normalized in ENTITY_GENERATORS:
+        return ENTITY_GENERATORS[normalized](fields)
+    return {f: fake.word() for f in fields}
 
 # -------------------- UPDATE LAST GENERATED --------------------
 
@@ -181,16 +258,17 @@ def update_last_generated(add_fields=None, remove_fields=None):
 
     updated_data = []
     entity_type = session_data.get("last_type", "student")
+    normalized_type = normalize_entity_type(entity_type) or entity_type
     for record in session_data["last_generated"]:
         # Remove fields
         for field in remove_fields:
             record.pop(field, None)
         # Add new fields
         for field in add_fields:
-            new_val = generate_entity_record(entity_type, [field])[field]
+            new_val = generate_entity_record(normalized_type, [field])[field]
             record[field] = new_val
         updated_data.append(record)
-    
+
     session_data["last_generated"] = updated_data
     print(f"✅ Updated last generated data with additions/removals.\n")
     for d in updated_data:
@@ -227,28 +305,21 @@ def run_agent(command):
     # --- Generate ---
     if match := re.search(r"generate\s+(\d+)\s+(\w+)(?:\s+with\s+(.*))?$", command, re.I):
         count = int(match.group(1))
-        entity_type = match.group(2).lower()
+        raw_entity_type = match.group(2)
+        entity_type = raw_entity_type.lower()
+        normalized_type = normalize_entity_type(entity_type)
         field_part = match.group(3)
         if field_part:
             fields = [f.strip().title() for f in re.split(r",|\band\b", field_part) if f.strip()]
         else:
-            # Default fields per entity
-            if entity_type in ["student","students"]:
-                fields = ["Name","Age","Grade","GPA","DOB","City","State","Address","School Name","Country","Zipcode"]
-            elif entity_type in ["college_student","college_students"]:
-                fields = ["Name","Age","DOB","College Name","Major","Year","GPA","City","State","Country"]
-            elif entity_type in ["bank_customer","bank_customers"]:
-                fields = ["Name","Age","DOB","Bank Name","ABA Number","Account Number","Balance","Email","Phone","Address","City","State","Country"]
-            elif entity_type in ["employee","employees"]:
-                fields = ["Name","Age","DOB","Job Title","Company","Email","Phone","Address","City","State","Country"]
-            else:
-                fields = ["Name"]
-        
+            fields = DEFAULT_FIELDS.get(normalized_type, ["Name"])
+
         data = [generate_entity_record(entity_type, fields) for _ in range(count)]
         session_data["last_generated"] = data
-        session_data["last_type"] = entity_type
+        session_data["last_type"] = normalized_type or entity_type
 
-        print(f"\n✅ Generated {count} {entity_type}(s):\n")
+        entity_label = normalized_type or entity_type
+        print(f"\n✅ Generated {count} {entity_label}(s):\n")
         for d in data:
             print(json.dumps(d, indent=2))
         return
