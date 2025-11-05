@@ -2,7 +2,7 @@ import re
 import json
 import csv
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from faker import Faker
 from xml.etree.ElementTree import Element, SubElement, ElementTree
 
@@ -137,6 +137,31 @@ def calculate_age_from_dob(dob):
         dob = dob.date()
     today = datetime.today().date()
     return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+
+
+def parse_dob_value(dob):
+    if isinstance(dob, str):
+        try:
+            return datetime.fromisoformat(dob).date()
+        except ValueError:
+            return None
+    if isinstance(dob, datetime):
+        return dob.date()
+    if isinstance(dob, date):
+        return dob
+    return None
+
+
+def format_dob_output(dob):
+    if dob is None:
+        return None
+    if isinstance(dob, str):
+        return dob
+    if isinstance(dob, datetime):
+        dob = dob.date()
+    if isinstance(dob, date):
+        return dob.isoformat()
+    return str(dob)
 
 
 def generate_birthdate_for_age(age):
@@ -311,7 +336,7 @@ def update_last_generated(add_fields=None, remove_fields=None):
     updated_data = []
     entity_type = session_data.get("last_type", "student")
     normalized_type = normalize_entity_type(entity_type) or entity_type
-    lower_add_fields = [f.lower() for f in add_fields]
+    normalized_add_fields = [FIELD_ALIASES.get(f.lower(), f.lower()) for f in add_fields]
 
     for record in session_data["last_generated"]:
         # Remove fields
@@ -320,41 +345,76 @@ def update_last_generated(add_fields=None, remove_fields=None):
             if existing_key:
                 record.pop(existing_key, None)
         # Add new fields
-        for field in add_fields:
+        age_min, age_max = AGE_RANGES.get(normalized_type, (5, 80))
+        age_requested = "age" in normalized_add_fields
+        dob_requested = "dob" in normalized_add_fields
+
+        age_key = find_field_key(record, "Age")
+        dob_key = find_field_key(record, "Dob")
+
+        existing_age = None
+        if age_key is not None:
+            try:
+                existing_age = int(record.get(age_key))
+            except (TypeError, ValueError):
+                existing_age = None
+
+        existing_dob = parse_dob_value(record.get(dob_key)) if dob_key is not None else None
+
+        desired_age = None
+        desired_dob = None
+
+        if age_requested:
+            if existing_dob is not None:
+                desired_age = calculate_age_from_dob(existing_dob)
+            elif existing_age is not None:
+                desired_age = existing_age
+
+        if dob_requested:
+            if existing_age is not None:
+                desired_dob = generate_birthdate_for_age(existing_age)
+            elif existing_dob is not None:
+                desired_dob = existing_dob
+
+        if age_requested and dob_requested:
+            if desired_age is None and desired_dob is None:
+                desired_age, desired_dob = random_age_and_dob(age_min, age_max)
+            elif desired_age is None and desired_dob is not None:
+                desired_age = calculate_age_from_dob(desired_dob)
+            elif desired_age is not None and desired_dob is None:
+                desired_dob = generate_birthdate_for_age(desired_age)
+        elif age_requested and desired_age is None:
+            desired_age, generated_dob = random_age_and_dob(age_min, age_max)
+            if dob_key is not None and not dob_requested:
+                record[dob_key] = format_dob_output(generated_dob)
+        elif dob_requested and desired_dob is None:
+            if existing_age is not None:
+                desired_dob = generate_birthdate_for_age(existing_age)
+            else:
+                _, desired_dob = random_age_and_dob(age_min, age_max)
+
+        for field, normalized_field in zip(add_fields, normalized_add_fields):
+            if normalized_field == "age":
+                if desired_age is None:
+                    desired_age, generated_dob = random_age_and_dob(age_min, age_max)
+                    if dob_requested and desired_dob is None:
+                        desired_dob = generated_dob
+                    elif dob_key is not None and not dob_requested:
+                        record[dob_key] = format_dob_output(generated_dob)
+                record[field] = desired_age
+                continue
+
+            if normalized_field == "dob":
+                if desired_dob is None:
+                    if desired_age is not None:
+                        desired_dob = generate_birthdate_for_age(desired_age)
+                    else:
+                        _, desired_dob = random_age_and_dob(age_min, age_max)
+                record[field] = format_dob_output(desired_dob)
+                continue
+
             new_val = generate_entity_record(normalized_type, [field])[field]
             record[field] = new_val
-            f_lower = field.lower()
-            age_min, age_max = AGE_RANGES.get(normalized_type, (5, 80))
-            if f_lower == "dob":
-                age_key = find_field_key(record, "Age")
-                age_value = None
-                if age_key is not None:
-                    age_value = record.get(age_key)
-                    try:
-                        age_value = int(age_value)
-                    except (TypeError, ValueError):
-                        age_value = None
-                if age_value is not None:
-                    dob = generate_birthdate_for_age(age_value)
-                    record[field] = dob.isoformat()
-                else:
-                    age_value, dob = random_age_and_dob(age_min, age_max)
-                    record[field] = dob.isoformat()
-                    if age_key is not None:
-                        record[age_key] = age_value
-            elif f_lower == "age":
-                dob_key = find_field_key(record, "Dob")
-                dob_value = record.get(dob_key) if dob_key else None
-                if dob_value is not None:
-                    record[field] = calculate_age_from_dob(dob_value)
-                else:
-                    age_value, dob = random_age_and_dob(age_min, age_max)
-                    record[field] = age_value
-                    if "dob" not in lower_add_fields and dob_key is not None:
-                        record[dob_key] = dob.isoformat()
-                    elif "dob" in lower_add_fields and dob_key is None:
-                        # ensure upcoming DOB addition uses the generated pair
-                        record.setdefault("Dob", dob.isoformat())
         updated_data.append(record)
 
     session_data["last_generated"] = updated_data
