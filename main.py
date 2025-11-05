@@ -2,7 +2,7 @@ import re
 import json
 import csv
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from faker import Faker
 from xml.etree.ElementTree import Element, SubElement, ElementTree
 
@@ -122,6 +122,87 @@ DEFAULT_FIELDS = {
     ],
 }
 
+AGE_RANGES = {
+    "student": (5, 18),
+    "college_student": (18, 25),
+    "bank_customer": (18, 80),
+    "employee": (22, 65),
+}
+
+
+def calculate_age_from_dob(dob):
+    if isinstance(dob, str):
+        dob = datetime.fromisoformat(dob).date()
+    elif isinstance(dob, datetime):
+        dob = dob.date()
+    today = datetime.today().date()
+    return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+
+
+def parse_dob_value(dob):
+    if isinstance(dob, str):
+        try:
+            return datetime.fromisoformat(dob).date()
+        except ValueError:
+            return None
+    if isinstance(dob, datetime):
+        return dob.date()
+    if isinstance(dob, date):
+        return dob
+    return None
+
+
+def format_dob_output(dob):
+    if dob is None:
+        return None
+    if isinstance(dob, str):
+        return dob
+    if isinstance(dob, datetime):
+        dob = dob.date()
+    if isinstance(dob, date):
+        return dob.isoformat()
+    return str(dob)
+
+
+def generate_birthdate_for_age(age):
+    age = int(age)
+    today = datetime.today().date()
+    start_date = today - timedelta(days=(age + 1) * 365)
+    end_date = today - timedelta(days=age * 365)
+    if end_date < start_date:
+        start_date, end_date = end_date, start_date
+    delta_days = max((end_date - start_date).days, 0)
+    for _ in range(20):
+        candidate = start_date + timedelta(days=random.randint(0, delta_days if delta_days > 0 else 0))
+        if calculate_age_from_dob(candidate) == age:
+            return candidate
+    # fallback to adjusting candidate if loop fails
+    candidate = end_date
+    age_delta = age - calculate_age_from_dob(candidate)
+    if age_delta:
+        try:
+            candidate = candidate.replace(year=candidate.year - age_delta)
+        except ValueError:
+            # handle leap day adjustments gracefully
+            candidate = candidate.replace(month=3, day=1, year=candidate.year - age_delta)
+    return candidate
+
+
+def random_age_and_dob(min_age, max_age):
+    """Return an age/DOB pair where both values are guaranteed to align."""
+
+    age = random.randint(min_age, max_age)
+    dob = generate_birthdate_for_age(age)
+    return age, dob
+
+
+def find_field_key(record, field_name):
+    target = field_name.lower()
+    for key in list(record.keys()):
+        if key.lower() == target:
+            return key
+    return None
+
 # -------------------- GENERATORS --------------------
 
 def generate_school_name(age):
@@ -138,8 +219,7 @@ def generate_school_name(age):
     return f"{random.choice(prefixes)} {school_type}"
 
 def generate_student_record(fields):
-    age = random.randint(5, 18)
-    dob = (datetime.today() - timedelta(days=age*365 + random.randint(0, 364))).date()
+    age, dob = random_age_and_dob(*AGE_RANGES["student"])
     grade = max(1, min(12, age - 5 + 1))
     record = {}
     for field in fields:
@@ -158,8 +238,7 @@ def generate_student_record(fields):
     return record
 
 def generate_college_student_record(fields):
-    age = random.randint(18, 25)
-    dob = (datetime.today() - timedelta(days=age*365 + random.randint(0, 364))).date()
+    age, dob = random_age_and_dob(*AGE_RANGES["college_student"])
     year = random.randint(1,4)
     record = {}
     for field in fields:
@@ -182,8 +261,7 @@ def generate_college_student_record(fields):
     return record
 
 def generate_bank_customer_record(fields):
-    age = random.randint(18, 80)
-    dob = (datetime.today() - timedelta(days=age*365 + random.randint(0, 364))).date()
+    age, dob = random_age_and_dob(*AGE_RANGES["bank_customer"])
     record = {}
     for field in fields:
         f_lower = field.lower()
@@ -205,8 +283,7 @@ def generate_bank_customer_record(fields):
     return record
 
 def generate_employee_record(fields):
-    age = random.randint(22, 65)
-    dob = (datetime.today() - timedelta(days=age*365 + random.randint(0, 364))).date()
+    age, dob = random_age_and_dob(*AGE_RANGES["employee"])
     record = {}
     for field in fields:
         f_lower = field.lower()
@@ -259,12 +336,83 @@ def update_last_generated(add_fields=None, remove_fields=None):
     updated_data = []
     entity_type = session_data.get("last_type", "student")
     normalized_type = normalize_entity_type(entity_type) or entity_type
+    normalized_add_fields = [FIELD_ALIASES.get(f.lower(), f.lower()) for f in add_fields]
+
     for record in session_data["last_generated"]:
         # Remove fields
         for field in remove_fields:
-            record.pop(field, None)
+            existing_key = find_field_key(record, field)
+            if existing_key:
+                record.pop(existing_key, None)
         # Add new fields
-        for field in add_fields:
+        age_min, age_max = AGE_RANGES.get(normalized_type, (5, 80))
+        age_requested = "age" in normalized_add_fields
+        dob_requested = "dob" in normalized_add_fields
+
+        age_key = find_field_key(record, "Age")
+        dob_key = find_field_key(record, "Dob")
+
+        existing_age = None
+        if age_key is not None:
+            try:
+                existing_age = int(record.get(age_key))
+            except (TypeError, ValueError):
+                existing_age = None
+
+        existing_dob = parse_dob_value(record.get(dob_key)) if dob_key is not None else None
+
+        desired_age = None
+        desired_dob = None
+
+        if age_requested:
+            if existing_dob is not None:
+                desired_age = calculate_age_from_dob(existing_dob)
+            elif existing_age is not None:
+                desired_age = existing_age
+
+        if dob_requested:
+            if existing_age is not None:
+                desired_dob = generate_birthdate_for_age(existing_age)
+            elif existing_dob is not None:
+                desired_dob = existing_dob
+
+        if age_requested and dob_requested:
+            if desired_age is None and desired_dob is None:
+                desired_age, desired_dob = random_age_and_dob(age_min, age_max)
+            elif desired_age is None and desired_dob is not None:
+                desired_age = calculate_age_from_dob(desired_dob)
+            elif desired_age is not None and desired_dob is None:
+                desired_dob = generate_birthdate_for_age(desired_age)
+        elif age_requested and desired_age is None:
+            desired_age, generated_dob = random_age_and_dob(age_min, age_max)
+            if dob_key is not None and not dob_requested:
+                record[dob_key] = format_dob_output(generated_dob)
+        elif dob_requested and desired_dob is None:
+            if existing_age is not None:
+                desired_dob = generate_birthdate_for_age(existing_age)
+            else:
+                _, desired_dob = random_age_and_dob(age_min, age_max)
+
+        for field, normalized_field in zip(add_fields, normalized_add_fields):
+            if normalized_field == "age":
+                if desired_age is None:
+                    desired_age, generated_dob = random_age_and_dob(age_min, age_max)
+                    if dob_requested and desired_dob is None:
+                        desired_dob = generated_dob
+                    elif dob_key is not None and not dob_requested:
+                        record[dob_key] = format_dob_output(generated_dob)
+                record[field] = desired_age
+                continue
+
+            if normalized_field == "dob":
+                if desired_dob is None:
+                    if desired_age is not None:
+                        desired_dob = generate_birthdate_for_age(desired_age)
+                    else:
+                        _, desired_dob = random_age_and_dob(age_min, age_max)
+                record[field] = format_dob_output(desired_dob)
+                continue
+
             new_val = generate_entity_record(normalized_type, [field])[field]
             record[field] = new_val
         updated_data.append(record)
